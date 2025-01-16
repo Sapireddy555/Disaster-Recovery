@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Multi-region failover setup using Route53 and S3 replication
+
+Resources:
+  PrimaryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "primary-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+
+  SecondaryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "secondary-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt ReplicationRole.Arn
+        Rules:
+          - Status: Enabled
+            Prefix: ""
+            Destination:
+              Bucket: !GetAtt SecondaryBucket.Arn
+
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:GetReplicationConfiguration
+                Resource: "*"
+
+  DNSFailover:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: example.com.
+      RecordSets:
+        - Name: failover.example.com.
+          Type: A
+          Failover: PRIMARY
+          SetIdentifier: Primary
+          TTL: 60
+          ResourceRecords:
+            - !GetAtt PrimaryBucket.DomainName
+        - Name: failover.example.com.
+          Type: A
+          Failover: SECONDARY
+          SetIdentifier: Secondary
+          TTL: 60
+          ResourceRecords:
+            - !GetAtt SecondaryBucket.DomainName
